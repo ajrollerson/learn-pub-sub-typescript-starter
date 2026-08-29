@@ -1,21 +1,28 @@
 import amqp from "amqplib";
-import { publishJSON } from "../internal/pubsub/publish.js";
 import { ExchangePerilDirect, PauseKey } from "../internal/routing/routing.js";
-import { clientWelcome, getInput } from "../internal/gamelogic/gamelogic.js";
+import { clientWelcome, commandStatus, getInput, printClientHelp, printQuit } from "../internal/gamelogic/gamelogic.js";
 import { declareAndBind, SimpleQueueType } from "../internal/pubsub/consume.js";
-import { printServerHelp } from "../internal/gamelogic/gamelogic.js";
+import { GameState } from "../internal/gamelogic/gamestate.js";
+import { commandSpawn } from "../internal/gamelogic/spawn.js";
+import { commandMove } from "../internal/gamelogic/move.js";
 
 async function main() {
   const rabbitConnString = "amqp://guest:guest@localhost:5672/";
   const conn = await amqp.connect(rabbitConnString);
-  const confirmChannel = await conn.createConfirmChannel()
   console.log("Connection successful!")
   console.log("Starting Peril client...");
 
   try {
     const username = await clientWelcome();
     await declareAndBind(conn, ExchangePerilDirect, `${PauseKey}.${username}`, PauseKey, SimpleQueueType.Transient);
-    printServerHelp()
+    const gameState = new GameState(username);
+
+    process.on("SIGINT", async () => {
+    console.log("Programme shutting down!");
+    await conn.close();
+    process.exit(0);
+    });
+
 
     while (true) {
       const input = await getInput()
@@ -24,39 +31,45 @@ async function main() {
         continue;
       }
       const command = input[0];
-      if (command === "pause") {
+      if (command === "spawn") {
         try {
-          console.log("Pausing!");
-            await publishJSON(confirmChannel, ExchangePerilDirect, PauseKey, { isPaused: true });
+            commandSpawn(gameState, input);
           } catch (err) {
-            console.log(err);
+            if (err instanceof Error) {
+              console.error(err.message);
+            } else {
+              console.error("An unexpected error occurred:", err);
+            }
           }
-      } else if (command === "resume") {
+      } else if (command === "move") {
         try {
-            console.log("Resuming!");
-            await publishJSON(confirmChannel, ExchangePerilDirect, PauseKey, { isPaused: false });
+            commandMove(gameState, input);
           } catch (err) {
-            console.log(err);
+            if (err instanceof Error) {
+              console.error(err.message);
+            } else {
+              console.error("An unexpected error occurred:", err);
+            }
           }
+      } else if (command === "status") {
+        await commandStatus(gameState);
+      } else if (command === "help") {
+        printClientHelp()
+      } else if (command ==="spam") {
+        console.log("Spamming not allowed yet!");
       } else if (command === "quit") {
-        console.log("Thanks for playing! Exiting...")
-        break;
+        printQuit();
+        await conn.close();
+        process.exit(0);
       } else {
-        console.log("Sorry, I don't understand. Please write again.")
+        console.error("Command unknown! Try again");
+        continue;
       }
     }
 
   } catch (err) {
     console.log(err);
   }
-
-clientWelcome
-
-  process.on("SIGINT", async () => {
-    console.log("Programme shutting down!");
-    await conn.close();
-    process.exit(0);
- });
 
 }
 
