@@ -1,11 +1,12 @@
 import amqp from "amqplib";
-import { ExchangePerilDirect, PauseKey } from "../internal/routing/routing.js";
+import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, PauseKey } from "../internal/routing/routing.js";
 import { clientWelcome, commandStatus, getInput, printClientHelp, printQuit } from "../internal/gamelogic/gamelogic.js";
 import { declareAndBind, SimpleQueueType, subscribeJSON } from "../internal/pubsub/consume.js";
 import { GameState } from "../internal/gamelogic/gamestate.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
 import { commandMove } from "../internal/gamelogic/move.js";
-import { handlerPause } from "./handlers.js";
+import { handlerMove, handlerPause } from "./handlers.js";
+import { publishJSON } from "../internal/pubsub/publish.js";
 
 async function main() {
   const rabbitConnString = "amqp://guest:guest@localhost:5672/";
@@ -17,7 +18,9 @@ async function main() {
     const username = await clientWelcome();
     await declareAndBind(conn, ExchangePerilDirect, `${PauseKey}.${username}`, PauseKey, SimpleQueueType.Transient);
     const gameState = new GameState(username);
-    subscribeJSON(conn, ExchangePerilDirect, `${PauseKey}.${username}`, PauseKey, SimpleQueueType.Transient, handlerPause(gameState));
+    const newChannel = await conn.createConfirmChannel()
+    await subscribeJSON(conn, ExchangePerilDirect, `${PauseKey}.${username}`, PauseKey, SimpleQueueType.Transient, handlerPause(gameState));
+    await subscribeJSON(conn, ExchangePerilTopic, `${ArmyMovesPrefix}.${username}`, `${ArmyMovesPrefix}.*`, SimpleQueueType.Transient, handlerMove(gameState));
 
     process.on("SIGINT", async () => {
     console.log("Programme shutting down!");
@@ -45,7 +48,8 @@ async function main() {
           }
       } else if (command === "move") {
         try {
-            commandMove(gameState, input);
+            const move = commandMove(gameState, input);
+            await publishJSON(newChannel, ExchangePerilTopic, `${ArmyMovesPrefix}.${username}`, move)
           } catch (err) {
             if (err instanceof Error) {
               console.error(err.message);
