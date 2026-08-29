@@ -1,10 +1,19 @@
 import amqp from "amqplib";
+import { publishJSON } from "../internal/pubsub/publish.js";
+import { ExchangePerilDirect, PauseKey } from "../internal/routing/routing.js";
 
 async function main() {
   const rabbitConnString = "amqp://guest:guest@localhost:5672/";
   const conn = await amqp.connect(rabbitConnString);
+  const confirmChannel = await conn.createConfirmChannel()
   console.log("Connection successful!")
   console.log("Starting Peril server...");
+
+  try {
+    await publishJSON(confirmChannel, ExchangePerilDirect, PauseKey, { isPaused: true });
+  } catch (err) {
+    console.log(err);
+  }
 
   process.on("SIGINT", async () => {
     console.log("Programme shutting down!");
