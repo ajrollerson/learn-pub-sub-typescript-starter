@@ -1,5 +1,6 @@
 import amqp, { type Channel } from "amqplib";
 import { buffer } from "stream/consumers";
+import { XDeadLetterExchange } from "../routing/routing.js";
 
 export enum SimpleQueueType {
   Durable,
@@ -25,6 +26,9 @@ const options = {
   durable: false,
   autoDelete: false,
   exclusive: false,
+  arguments: {
+  "x-dead-letter-exchange": `${XDeadLetterExchange}`,
+  }
 }
 
 if (queueType === SimpleQueueType.Durable) {
