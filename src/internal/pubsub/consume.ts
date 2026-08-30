@@ -6,6 +6,12 @@ export enum SimpleQueueType {
   Transient,
 }
 
+export enum AckType {
+    Ack,
+    NackRequeue,
+    NackDiscard,
+}
+
 export async function declareAndBind(
   conn: amqp.ChannelModel,
   exchange: string,
@@ -41,7 +47,7 @@ export async function subscribeJSON<T>(
   queueName: string,
   key: string,
   queueType: SimpleQueueType,
-  handler: (data: T) => void,
+  handler: (data: T) => AckType,
 ): Promise<void> {
     const [newChannel, newQueue] = await declareAndBind(conn, exchange, queueName, key, queueType);
     newChannel.consume(newQueue.queue, function (msg: amqp.ConsumeMessage | null) {
@@ -51,8 +57,21 @@ export async function subscribeJSON<T>(
         const buffer = msg.content.toString();
         try {
             const parsedMsg = JSON.parse(buffer) as T;
-            handler(parsedMsg);
-            newChannel.ack(msg);
+            const ackType = handler(parsedMsg);
+            switch (ackType) {
+                case AckType.Ack:
+                    newChannel.ack(msg);
+                    console.log("Messaged acked!");
+                    break;
+                case AckType.NackRequeue:
+                    newChannel.nack(msg, false, true);
+                    console.log("Message Nackrequeued!");
+                    break;
+                case AckType.NackDiscard:
+                    newChannel.nack(msg, false, false);
+                    console.log("Message Nackdiscarded");
+                    break;
+            }
         } catch (err) {
             console.error(err)
         }
