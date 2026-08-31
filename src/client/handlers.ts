@@ -34,9 +34,11 @@ export function handlerMove(gs: GameState, channel: ConfirmChannel): (move: Army
             defender: gs.getPlayerSnap(),
           };
           await publishJSON(channel, ExchangePerilTopic, `${WarRecognitionsPrefix}.${rw.defender.username}`, rw);
-          return AckType.NackRequeue;
+          return AckType.Ack;
         }
       }
+    } catch (err) {
+      return AckType.NackRequeue
     } finally {
       process.stdout.write("> ");
     }
