@@ -1,6 +1,7 @@
 import amqp, { type Channel } from "amqplib";
 import { buffer } from "stream/consumers";
 import { XDeadLetterExchange } from "../routing/routing.js";
+import { decode } from "@msgpack/msgpack";
 
 export enum SimpleQueueType {
   Durable,
@@ -53,31 +54,65 @@ export async function subscribeJSON<T>(
   queueType: SimpleQueueType,
   handler: (data: T) => Promise<AckType> | AckType,
 ): Promise<void> {
-    const [newChannel, newQueue] = await declareAndBind(conn, exchange, queueName, key, queueType);
-    newChannel.consume(newQueue.queue, async function (msg: amqp.ConsumeMessage | null) {
+    await subscribe(conn, exchange, queueName, key, queueType, handler, (data) => JSON.parse(data.toString()));
+};
+            
+
+export async function subscribeMsgPack<T>(
+  conn: amqp.ChannelModel,
+  exchange: string,
+  queueName: string,
+  key: string,
+  queueType: SimpleQueueType,
+  handler: (data: T) => Promise<AckType> | AckType,
+): Promise<void> {
+    await subscribe(conn, exchange, queueName, key, queueType, handler, (data) => decode(data) as T);
+}
+
+export async function subscribe<T>(
+  conn: amqp.ChannelModel,
+  exchange: string,
+  queueName: string,
+  routingKey: string,
+  simpleQueueType: SimpleQueueType,
+  handler: (data: T) => Promise<AckType> | AckType,
+  deserializer: (data: Buffer) => T,
+): Promise<void> {
+    const [newChannel, newQueue] = await declareAndBind(conn, exchange, queueName, routingKey, simpleQueueType);
+    await newChannel.consume(newQueue.queue, async function (msg: amqp.ConsumeMessage | null) {
         if (msg === null) {
             return;
         }
-        const buffer = msg.content.toString();
+        let decodedMsg: T;
+
         try {
-            const parsedMsg = JSON.parse(buffer) as T;
-            const ackType = await handler(parsedMsg);
+            decodedMsg = deserializer(msg.content);
+            } catch (err) {
+             console.error("Error in decoding message!")
+            return;
+            }
+
+        try {
+            const ackType = await handler(decodedMsg);
             switch (ackType) {
                 case AckType.Ack:
                     newChannel.ack(msg);
-                    console.log("Messaged acked!");
                     break;
                 case AckType.NackRequeue:
                     newChannel.nack(msg, false, true);
-                    console.log("Message Nackrequeued!");
                     break;
                 case AckType.NackDiscard:
                     newChannel.nack(msg, false, false);
-                    console.log("Message Nackdiscarded");
                     break;
+                default: {
+                    const unreachable: never = ackType;
+                    console.error("Unexpected ack type:", unreachable);
+                    return;
+                }
             }
         } catch (err) {
-            console.error(err)
+            console.error(err);
+            newChannel.nack(msg, false, false);
         }
     });
 }
