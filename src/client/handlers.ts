@@ -8,6 +8,7 @@ import type { ConfirmChannel } from "amqplib";
 import { publishJSON } from "../internal/pubsub/publish.js";
 import { ExchangePerilDirect, ExchangePerilTopic, WarRecognitionsPrefix } from "../internal/routing/routing.js";
 import { handleWar, WarOutcome, type WarResolution } from "../internal/gamelogic/war.js";
+import { publishGameLog } from "./index.js";
 
 export function handlerPause(gs: GameState): (ps: PlayingState) => AckType {
   return function (ps: PlayingState): AckType {
@@ -45,25 +46,34 @@ export function handlerMove(gs: GameState, channel: ConfirmChannel): (move: Army
   };
 }
 
-export function handlerWar(gs: GameState): (rw: RecognitionOfWar) => AckType {
-  return function (rw: RecognitionOfWar): AckType {
+export function handlerWar(gs: GameState, ch: ConfirmChannel): (rw: RecognitionOfWar) => Promise<AckType> {
+  return async function (rw: RecognitionOfWar): Promise<AckType> {
     try {
+      let message = " "
       const resolution = handleWar(gs, rw);
       switch (resolution.result) {
-        case WarOutcome.NotInvolved: 
+        case WarOutcome.NotInvolved:
           return AckType.NackRequeue;
         case WarOutcome.NoUnits:
           return AckType.NackDiscard;
         case WarOutcome.OpponentWon:
+          message = `${resolution.winner} won a war against ${resolution.loser}`;
+          await publishGameLog(ch, gs.getUsername(), message);
           return AckType.Ack
         case WarOutcome.YouWon:
+          message = `${resolution.winner} won a war against ${resolution.loser}`;
+          await publishGameLog(ch, gs.getUsername(), message);
           return AckType.Ack;
         case WarOutcome.Draw:
+          message = `A war between ${resolution.attacker} and ${resolution.defender} resulted in a draw`;
+          await publishGameLog(ch, gs.getUsername(), message);
           return AckType.Ack;
         default:
           console.error("Unknown war outcome.");
           return AckType.NackDiscard;
         }
+    } catch (err) {
+      return AckType.NackRequeue
     } finally {
       process.stdout.write("> ");
     }
