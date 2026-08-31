@@ -1,6 +1,6 @@
 import amqp, { type ConfirmChannel } from "amqplib";
 import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, GameLogSlug, PauseKey, WarRecognitionsPrefix } from "../internal/routing/routing.js";
-import { clientWelcome, commandStatus, getInput, printClientHelp, printQuit } from "../internal/gamelogic/gamelogic.js";
+import { clientWelcome, commandStatus, getInput, getMaliciousLog, printClientHelp, printQuit } from "../internal/gamelogic/gamelogic.js";
 import { declareAndBind, SimpleQueueType, subscribeJSON } from "../internal/pubsub/consume.js";
 import { GameState } from "../internal/gamelogic/gamestate.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
@@ -75,7 +75,11 @@ async function main() {
       } else if (command === "help") {
         printClientHelp()
       } else if (command ==="spam") {
-        console.log("Spamming not allowed yet!");
+        const n = Number(input[1]);
+        const malMessage = getMaliciousLog();
+        for (let i: number = 0; i < n; i++) {
+          publishGameLog(newChannel, username, malMessage);
+        }
       } else if (command === "quit") {
         printQuit();
         await conn.close();
